@@ -22,9 +22,19 @@ Example:
       ################################################
 
 """
-from itertools import combinations
+from itertools import combinations, permutations
 from random import randint, sample
 from time import time
+from string import ascii_lowercase
+from nltk.corpus import brown
+from collections import Counter
+import sys
+import os
+import sqlite3
+import re
+
+ZEROS = dict.fromkeys(ascii_lowercase, 0)
+DB_PATH = ".countdown_words.db"
 
 
 def get_target():
@@ -212,7 +222,7 @@ def all_subgroups(ns):
         yield ns
 
     else:
-        for i in range(1, len(ns)//2 + 1):
+        for i in range(1, (len(ns)+1)//2):
 
             for lcs in combinations(ns, i):
                 temp = list(ns)
@@ -229,7 +239,7 @@ def all_subgroups(ns):
                             yield (ls, rs)
 
 
-def compare():
+def run_numbers():
     """ Run 20 numbers rounds.
     """
     for _ in range(20): numbers(get_numbers(), get_target()); print("-"*80);
@@ -244,7 +254,136 @@ def prompt_numbers():
 def prompt_target():
     """ Prompt the user for the target.
     """
-    int(input("Enter the target: "))
+    return int(input("Enter the target: "))
+
+
+def run_letters(n=20):
+    """ Run 20 letters rounds.
+    """
+    for _ in range(n): letters(get_letters()); print("-" * 80)
+
+
+def get_letters():
+    """ Get 7 random letters and two additional random vowels.
+    """
+    return ''.join(sample(ascii_lowercase * 3, 7) + sample("aeiou", 2))
+
+
+def get_each_word():
+    """ Get each ascii only word of length between 3 and 9 inclusive.
+    """
+    p = ".*[^a-z].*"
+
+    return (w for w in brown.words if 2 < len(w) <= 9 and not re.match(p, w))
+
+
+def get_unique_frequencies():
+    """ Get a single word for each unique letter frequencies.
+    """
+    letter_frequency_map = {}
+    for w in get_each_word():
+        frequencies = [f for (_, f) in sorted({**ZEROS, **Counter(w)}.items())]
+        letter_frequency_map[tuple(frequencies)] = w
+
+    return tuple(letter_frequency_map.items())
+
+
+def connect():
+    """ Get a connection to the SQLite database.
+    """
+    return sqlite3.connect(DB_PATH)
+
+
+def get_create_query():
+    """ Get the create table query string.
+    """
+    create_str = "CREATE TABLE words ("
+    for l in ascii_lowercase: create_str += "{} integer, ".format(l)
+    create_str += "word text, length integer)"
+
+    return create_str
+
+
+def get_insert_query():
+    """ Get the insert into table query string.
+    """
+    return "INSERT INTO words VALUES ({})".format(", ".join("?" * 28))
+
+
+def get_insert_vals():
+    """ Get all (frequencies, word, word length) records to insert.
+    """
+    return [(*fs, w, len(w)) for fs, w in get_unique_frequencies()]
+
+
+def words_table():
+    """ Create and populate the SQLite table if it doesn't exist.
+    """
+    if not os.path.isfile(DB_PATH):
+        c = connect()
+        c.execute(get_create_query())
+        c.executemany(get_insert_query(), get_insert_vals())
+        c.commit()
+        c.close()
+
+
+def get_check_query(chars):
+    """ Get the query to find the longest acceptable word.
+    """
+    query = "SELECT word FROM words WHERE 1 = 1 "
+    for (letter, count) in  tuple(sorted({**ZEROS, **Counter(chars)}.items())):
+        query += "AND {} <= {} ".format(letter, count)
+    query += "ORDER BY length DESC LIMIT 1"
+
+    return query
+
+
+def check_chars(chars):
+    """ Query the SQLite table for the longest acceptable word.
+    """
+    c = connect()
+    t = c.execute(get_check_query(chars)).fetchone()
+    c.close()
+
+    if t: return t[0]
+
+
+def prompt_letters():
+    """ Prompt the user for a list of letters to play the letters round.
+    """
+    letters = input("Enter the letters ('a b ...'): ").lower().strip().split()
+
+    if len(letters) == 0: letters = get_letters()
+    elif len(letters) < 9: raise Exception("Game requires 9 letters.")
+
+    return letters
+
+
+def letters(chars):
+    """ Solve the letters round of Countdown given an iterable of chars.
+    """
+    print("\n  Letters: {}\n".format(" ".join(chars).upper()))
+
+    t0 = time()
+    words_table()
+    solution = check_chars(chars)
+
+    if solution:
+        print("We found '{}' for {} points!".format(solution, len(solution)))
+    else:
+        print("We didn't find anything... 0 points.")
+
+    print("Time: {:0.2f} seconds.\n".format(time() - t0))
+
 
 if __name__ == "__main__":
-    numbers(prompt_numbers(), prompt_target())
+    game_type = sys.argv[1] or "numbers"
+
+    if game_type == "numbers":
+        numbers(prompt_numbers(), prompt_target())
+
+    elif game_type == "letters":
+        letters(prompt_letters())
+
+    else:
+        print("To play a countdown game, enter 'numbers' or 'letters'.")
