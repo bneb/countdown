@@ -1,5 +1,4 @@
 """ This file contains functions to solve the countdown numbers game.
-    [link](https://en.wikipedia.org/wiki/Countdown_(game_show)#Numbers_round)
     The game follows simple rules. Given a target value and six numbers,
     use arithmetic operations to calculate the target. You do not need
     to use all the numbers. Numbers are either small {1 to 10} or large
@@ -22,19 +21,31 @@ Example:
       ################################################
 
 """
-from itertools import combinations, permutations
-from random import randint, sample
-from time import time
-from string import ascii_lowercase
-from nltk.corpus import brown
 from collections import Counter
-import sys
+from itertools import combinations
+from random import randint, sample
+from string import ascii_lowercase
+from time import time
+import bz2
 import os
-import sqlite3
 import re
+import sqlite3
+import sys
 
 ZEROS = dict.fromkeys(ascii_lowercase, 0)
 DB_PATH = ".countdown_words.db"
+
+
+def _blue(s):
+    """ Get a string that when printed, is blue.
+    """
+    return "\033[94m" + s + "\033[0m"
+
+
+def _red(s):
+    """ Get a string that when printed, is red.
+    """
+    return "\033[93m" + s + "\033[0m"
 
 
 def get_target():
@@ -73,7 +84,7 @@ def numbers(ns=None, t=None):
     print("\nNumbers: {}\n".format(ns))
 
     length, solution, is_solved, seconds = solve(ns, t)
-    outcome = ("\033[94mSOLVED!" if is_solved else "\033[93mClose!") + "\033[0m"
+    outcome = _blue("SOLVED!") if is_solved else _red("Close!")
 
     print("  " + "#" * (length + 10))
     print("  ###  {:^{length}}  ###".format(outcome,  length=length+9))
@@ -225,10 +236,9 @@ def all_subgroups(ns):
         for i in range(1, (len(ns)+1)//2):
 
             for lcs in combinations(ns, i):
-                temp = list(ns)
-                for x in lcs: temp.remove(x)
+                remaining_numbers = [x for x in list(ns) if x not in lcs]
 
-                for rcs in combinations(tuple(temp), len(ns)-i):
+                for rcs in combinations(tuple(remaining_numbers), len(ns)-i):
 
                     for ls in all_subgroups(lcs):
                         yield ls
@@ -270,11 +280,10 @@ def get_letters():
 
 
 def get_each_word():
-    """ Get each ascii only word of length between 3 and 9 inclusive.
+    """ Get a generator for each word in the compressed word list.
     """
-    p = ".*[^a-z].*"
-
-    return (w for w in brown.words if 2 < len(w) <= 9 and not re.match(p, w))
+    with bz2.open(".word_list.txt.bz2", "rt") as f:
+        return (w.strip() for w in f.readlines())
 
 
 def get_unique_frequencies():
@@ -351,7 +360,7 @@ def check_chars(chars):
 def prompt_letters():
     """ Prompt the user for a list of letters to play the letters round.
     """
-    letters = input("Enter the letters ('a b ...'): ").lower().strip().split()
+    letters = input("\nEnter the letters ('a b ...'): ").lower().strip().split()
 
     if len(letters) == 0: letters = get_letters()
     elif len(letters) < 9: raise Exception("Game requires 9 letters.")
@@ -361,29 +370,44 @@ def prompt_letters():
 
 def letters(chars):
     """ Solve the letters round of Countdown given an iterable of chars.
+    $ python solve_countdown.py letters
+
+    Enter the letters ('a b ...'): n q i a l t j e u
+
+      Letters: N Q I A L T J E U
+
+      We found 'antique' for 7 points!
+      Time: 0.01 seconds.
+
     """
     print("\n  Letters: {}\n".format(" ".join(chars).upper()))
 
     t0 = time()
     words_table()
-    solution = check_chars(chars)
+    sol = check_chars(chars)
 
-    if solution:
-        print("We found '{}' for {} points!".format(solution, len(solution)))
+    if sol:
+        print("  We found '{}' for {} points!".format(_blue(sol), len(sol)))
     else:
-        print("We didn't find anything... 0 points.")
+        print(_red("  We didn't find anything... 0 points."))
 
-    print("Time: {:0.2f} seconds.\n".format(time() - t0))
+    print("  Time: {:0.2f} seconds.\n".format(time() - t0))
+
+
+def prompt_game_type():
+    """ Prompt the user until they enter 'numbers' or 'letters'.
+    """
+    result = ""
+    while result.lower() not in ["letters", "numbers"]:
+        result = input("Select game type of either 'numbers' or 'letters': ")
+    return result
 
 
 if __name__ == "__main__":
-    game_type = sys.argv[1] or "numbers"
+    game_type = prompt_game_type() if len(sys.argv) < 2 else sys.argv[1]
 
     if game_type == "numbers":
         numbers(prompt_numbers(), prompt_target())
 
     elif game_type == "letters":
         letters(prompt_letters())
-
-    else:
-        print("To play a countdown game, enter 'numbers' or 'letters'.")
